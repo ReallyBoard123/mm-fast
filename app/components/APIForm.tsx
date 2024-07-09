@@ -57,10 +57,10 @@ export function APIForm() {
       }
 
       setLogs(data.logs)
-    } catch (error) {
+    } catch (error: unknown) {
       console.error("Error:", error)
       if (error instanceof Error) {
-        setLogs((prevLogs) => [...prevLogs, error.message])
+        setLogs((prevLogs) => [...prevLogs, (error as Error).message])
       } else {
         setLogs((prevLogs) => [...prevLogs, "An unknown error occurred"])
       }
@@ -83,7 +83,7 @@ export function APIForm() {
                   <Input placeholder="Enter your access token" {...field} />
                 </FormControl>
                 <FormDescription>
-                  Please enter the access token from Motion Miners.
+                  Please enter the access token provided to you.
                 </FormDescription>
                 <FormMessage />
               </FormItem>
