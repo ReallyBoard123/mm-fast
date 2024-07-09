@@ -83,7 +83,7 @@ export function APIForm() {
                   <Input placeholder="Enter your access token" {...field} />
                 </FormControl>
                 <FormDescription>
-                  Please enter the access token provided to you.
+                  Please enter the access token from Motion Miners.
                 </FormDescription>
                 <FormMessage />
               </FormItem>
