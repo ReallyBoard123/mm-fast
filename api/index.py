@@ -16,13 +16,3 @@ app.add_middleware(
 def hello_world():
     return {"message": "Hello World"}
 
-# For Vercel serverless function
-from fastapi.responses import JSONResponse
-
-def handler(request):
-    # Delegate request to FastAPI app
-    response = app(request)
-
-    # Convert FastAPI response to JSON response
-    content = response.body.decode()
-    return JSONResponse(content=content)
