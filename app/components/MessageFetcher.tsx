@@ -32,10 +32,10 @@ const MessageFetcher: React.FC = () => {
   return (
     <div className="flex flex-col items-center space-y-4">
       <Button onClick={fetchMessage} disabled={isLoading}>
-        {isLoading ? "Loading..." : "Fetch Message"}
+        {isLoading ? "Loading..." : "Check Server Connection"}
       </Button>
       {message && (
-        <div className="p-4 bg-gray-100 rounded-md">
+        <div className="p-2 bg-gray-100 rounded-md">
           <p>{message}</p>
         </div>
       )}
