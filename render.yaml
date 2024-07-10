@@ -1,26 +1,29 @@
 services:
   - type: web
     plan: free
-    name: nextjs-frontend
-    env: node
-    buildCommand: cd mm-fast && npm install && npm run build
-    startCommand: cd mm-fast && npm start
-    envVars:
-      - key: NODE_ENV
-        value: production
-    staticPublishPath: ./mm-fast/.next
-    routes:
-      - type: rewrite
-        source: /*
-        destination: /
-
-
+    name: mm-fast-backend
+    env: python
+    rootDir: mm-fast/api
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
+    autoDeploy: true
+    buildFilter:
+      paths:
+        - mm-fast/api/**
+  
   - type: web
     plan: free
-    name: fastapi-backend
-    env: python
-    buildCommand: cd mm-fast && pip install -r requirements.txt
-    startCommand: cd mm-fast && uvicorn api.index:app --host 0.0.0.0 --port $PORT
-    envVars:
-      - key: PYTHON_VERSION
-        value: 3.12.0
+    name: mm-fast-frontend
+    env: node
+    rootDir: mm-fast
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    autoDeploy: true
+    buildFilter:
+      paths:
+        - mm-fast/app/**
+        - mm-fast/pages/**
+        - mm-fast/components/**
+        - mm-fast/public/**
+        - mm-fast/styles/**
+        - mm-fast/next.config.mjs
