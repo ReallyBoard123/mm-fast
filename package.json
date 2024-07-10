@@ -1,8 +1,6 @@
 {
   "scripts": {
-    "fastapi-dev": "pip3 install -r requirements.txt && python3 -m uvicorn api.index:app --reload",
-    "next-dev": "next dev",
-    "dev": "concurrently \"npm run next-dev\" \"npm run fastapi-dev\"",
+    "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "next lint"
@@ -15,7 +13,6 @@
     "autoprefixer": "10.4.14",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.1",
-    "concurrently": "^8.0.1",
     "eslint": "8.41.0",
     "eslint-config-next": "14.2.4",
     "lucide-react": "^0.404.0",
