@@ -9,7 +9,7 @@ services:
       - key: NODE_ENV
         value: production
       - key: NEXT_PUBLIC_API_URL
-        value: http://127.0.0.1:8000/api
+        value: https://fastapi-backend-qh6a.onrender.com/api
 
   - type: web
     name: fastapi-backend
