@@ -3,11 +3,13 @@ services:
     name: nextjs-frontend
     env: node
     plan: free 
-    buildCommand: npm install && npm run build
-    startCommand: npm start
+    buildCommand: pnpm install && pnpm run build
+    startCommand: pnpm start
     envVars:
       - key: NODE_ENV
         value: production
+      - key: NEXT_PUBLIC_API_URL
+        value: http://127.0.0.1:8000/api
 
   - type: web
     name: fastapi-backend
