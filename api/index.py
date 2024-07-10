@@ -9,12 +9,11 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "https://mm-fast.vercel.app"],
+    allow_origins=["https://your-frontend-url.onrender.com"],  # Update this with your Render URL
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 class TokenRequest(BaseModel):
     token: str
     save_folder: Optional[str] = "default_folder"
