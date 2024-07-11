@@ -36,9 +36,9 @@ export function APIForm() {
   })
 
   async function onSubmit(values: z.infer<typeof formSchema>) {
-    setLoading(true)
-    setLogs([])
-    setDownloadLink(null)
+    setLoading(true);
+    setLogs([]);
+    setDownloadLink(null);
     try {
       const response = await fetch("/api/process", {
         method: "POST",
@@ -46,28 +46,29 @@ export function APIForm() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify(values),
-      })
-
-      const data = await response.json()
+      });
+  
+      const data = await response.json();
       if (!response.ok) {
-        throw new Error(data.detail || "Something went wrong")
+        throw new Error(data.detail || "Something went wrong");
       }
-
-      setLogs(data.logs || [])
+  
+      setLogs(data.logs || []);
       if (data.download_link) {
-        setDownloadLink(data.download_link)
+        setDownloadLink(data.download_link);
       }
     } catch (error: unknown) {
-      console.error("Error:", error)
+      console.error("Error:", error);
       if (error instanceof Error) {
-        setLogs((prevLogs) => [...prevLogs, (error as Error).message])
+        setLogs((prevLogs) => [...prevLogs, (error as Error).message]);
       } else {
-        setLogs((prevLogs) => [...prevLogs, "An unknown error occurred"])
+        setLogs((prevLogs) => [...prevLogs, "An unknown error occurred"]);
       }
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
   }
+  
 
   return (
     <div className="space-y-8">

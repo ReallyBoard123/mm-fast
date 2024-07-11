@@ -13,7 +13,7 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://nextjs-frontend-b6w0.onrender.com/"], 
+    allow_origins=["https://nextjs-frontend-b6w0.onrender.com"], 
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -60,6 +60,7 @@ async def process_data(request: TokenRequest):
 
             return {"message": "Data processed successfully!", "logs": logs, "download_link": download_link}
     except Exception as e:
+        print(f"Error in /api/process: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/download/{filename}")
