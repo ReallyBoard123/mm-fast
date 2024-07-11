@@ -6,7 +6,7 @@ services:
     name: nextjs-frontend
     env: node
     plan: free 
-    buildCommand: pnpm install && pnpm run build
+    buildCommand: pnpm install --production=false && pnpm run build
     startCommand: pnpm start
     envVars:
       - key: NODE_ENV
