@@ -42,7 +42,7 @@ export function APIForm() {
     setDownloadLink(null);
     try {
       const response = await axios.post("/api/process", values, {
-        timeout: 30000, // 30 seconds timeout
+        timeout: 300000, // 300 seconds timeout
       });
 
       if (response.status !== 200) {
