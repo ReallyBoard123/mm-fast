@@ -24,13 +24,14 @@ const formSchema = z.object({
     message: "Token must be at least 10 characters.",
   }),
   save_folder: z.string().min(1, {
-    message: "Save folder path is required.",
+    message: "Save folder name is required.",
   }),
 })
 
 export function APIForm() {
   const [logs, setLogs] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
+  const [downloadLink, setDownloadLink] = useState<string | null>(null)
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
@@ -42,6 +43,7 @@ export function APIForm() {
   async function onSubmit(values: z.infer<typeof formSchema>) {
     setLoading(true)
     setLogs([]) // Clear previous logs
+    setDownloadLink(null) // Clear previous download link
     try {
       const response = await fetch("/api/process", {
         method: "POST",
@@ -57,6 +59,9 @@ export function APIForm() {
       }
 
       setLogs(data.logs)
+      if (data.download_link) {
+        setDownloadLink(data.download_link)
+      }
     } catch (error: unknown) {
       console.error("Error:", error)
       if (error instanceof Error) {
@@ -96,10 +101,10 @@ export function APIForm() {
               <FormItem>
                 <FormLabel>Save Folder</FormLabel>
                 <FormControl>
-                  <Input placeholder="Enter the save folder path" {...field} />
+                  <Input placeholder="Enter the save folder name" {...field} />
                 </FormControl>
                 <FormDescription>
-                  Provide the absolute path to the folder where you want to save the data.
+                  Provide a name for the folder where you want to save the data.
                 </FormDescription>
                 <FormMessage />
               </FormItem>
@@ -107,9 +112,17 @@ export function APIForm() {
           />
           <div className="flex space-x-4">
             <Button type="submit" disabled={loading}>
-              {loading ? "Submitting..." : "Submit"}
+              {loading ? "Processing..." : "Submit"}
             </Button>
             <LogDrawer logs={logs} />
+            {downloadLink && (
+              <Button 
+                onClick={() => window.open(downloadLink, '_blank')}
+                disabled={loading}
+              >
+                Download Processed Data
+              </Button>
+            )}
           </div>
         </form>  
       </Form>
