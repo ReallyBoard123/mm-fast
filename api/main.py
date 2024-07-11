@@ -15,8 +15,6 @@ def setup_api(access_token, data_dir):
         print(f"Error setting up API: {e}")
         traceback.print_exc()
 
-
-
 def list_processes(data):
     try:
         return pd.DataFrame(data.processes.keys(), columns=["process_uuid"])

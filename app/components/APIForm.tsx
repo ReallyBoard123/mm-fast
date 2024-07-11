@@ -5,7 +5,6 @@ import { useForm } from "react-hook-form"
 import { z } from "zod"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { Button } from "../components/ui/button"
-import axios from "axios";
 import {
   Form,
   FormControl,
@@ -37,32 +36,36 @@ export function APIForm() {
   })
 
   async function onSubmit(values: z.infer<typeof formSchema>) {
-    setLoading(true);
-    setLogs([]);
-    setDownloadLink(null);
+    setLoading(true)
+    setLogs([])
+    setDownloadLink(null)
     try {
-      const response = await axios.post("/api/process", values, {
-        timeout: 300000, // 300 seconds timeout
-      });
+      const response = await fetch("/api/process", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(values),
+      })
 
-      if (response.status !== 200) {
-        throw new Error(response.data.detail || "Something went wrong");
+      const data = await response.json()
+      if (!response.ok) {
+        throw new Error(data.detail || "Something went wrong")
       }
 
-      setLogs(response.data.logs || []);
-      if (response.data.download_link) {
-        setDownloadLink(response.data.download_link);
+      setLogs(data.logs || [])
+      if (data.download_link) {
+        setDownloadLink(data.download_link)
       }
-    } catch (error) {
-      if (axios.isAxiosError(error)) {
-        console.error("Axios error:", error.toJSON());
-        setLogs((prevLogs) => [...prevLogs, (error as Error).message]);
+    } catch (error: unknown) {
+      console.error("Error:", error)
+      if (error instanceof Error) {
+        setLogs((prevLogs) => [...prevLogs, (error as Error).message])
       } else {
-        console.error("Error:", error);
-        setLogs((prevLogs) => [...prevLogs, "An unknown error occurred"]);
+        setLogs((prevLogs) => [...prevLogs, "An unknown error occurred"])
       }
     } finally {
-      setLoading(false);
+      setLoading(false)
     }
   }
 
