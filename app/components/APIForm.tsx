@@ -41,28 +41,30 @@ export function APIForm() {
     setLogs([]);
     setDownloadLink(null);
     try {
-      const response = await axios.post("/api/process", values);
-  
+      const response = await axios.post("/api/process", values, {
+        timeout: 30000, // 30 seconds timeout
+      });
+
       if (response.status !== 200) {
         throw new Error(response.data.detail || "Something went wrong");
       }
-  
+
       setLogs(response.data.logs || []);
       if (response.data.download_link) {
         setDownloadLink(response.data.download_link);
       }
     } catch (error) {
-      console.error("Error:", error);
       if (axios.isAxiosError(error)) {
-        setLogs((prevLogs) => [...prevLogs, (error as Error).message]);
+        console.error("Axios error:", error.toJSON());
+        setLogs((prevLogs) => [...prevLogs, error.message]);
       } else {
+        console.error("Error:", error);
         setLogs((prevLogs) => [...prevLogs, "An unknown error occurred"]);
       }
     } finally {
       setLoading(false);
     }
   }
-  
 
   return (
     <div className="space-y-8">
