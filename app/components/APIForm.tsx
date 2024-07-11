@@ -4,6 +4,7 @@ import { useState } from "react"
 import { useForm } from "react-hook-form"
 import { z } from "zod"
 import { zodResolver } from "@hookform/resolvers/zod"
+import axios from "axios"
 import { Button } from "../components/ui/button"
 import {
   Form,
@@ -40,26 +41,20 @@ export function APIForm() {
     setLogs([])
     setDownloadLink(null)
     try {
-      const response = await fetch("/api/process", {
-        method: "POST",
+      const response = await axios.post(`${process.env.NEXT_PUBLIC_API_URL}/process`, values, {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(values),
       })
-
-      const data = await response.json()
-      if (!response.ok) {
-        throw new Error(data.detail || "Something went wrong")
-      }
-
+  
+      const data = response.data
       setLogs(data.logs || [])
       if (data.download_link) {
         setDownloadLink(data.download_link)
       }
-    } catch (error: unknown) {
+    } catch (error) {
       console.error("Error:", error)
-      if (error instanceof Error) {
+      if (axios.isAxiosError(error)) {
         setLogs((prevLogs) => [...prevLogs, (error as Error).message])
       } else {
         setLogs((prevLogs) => [...prevLogs, "An unknown error occurred"])
@@ -68,6 +63,7 @@ export function APIForm() {
       setLoading(false)
     }
   }
+  
 
   return (
     <div className="space-y-8">

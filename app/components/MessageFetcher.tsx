@@ -1,7 +1,7 @@
 "use client"
 
-
 import React, { useState } from 'react';
+import axios from 'axios';
 import { Button } from "../components/ui/button";
 
 const MessageFetcher: React.FC = () => {
@@ -13,21 +13,22 @@ const MessageFetcher: React.FC = () => {
     setIsLoading(true);
     setError("");
     try {
-      const apiUrl = '/api/python';
-      const response = await fetch(apiUrl);
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      const data = await response.json();
+      const response = await axios.get(`${process.env.NEXT_PUBLIC_API_URL}/python`);
+      const data = response.data;
       setMessage(data.message);
     } catch (error) {
       console.error("Error fetching message:", error);
-      setError(`Error fetching message: ${(error as Error).message}`);
+      if (axios.isAxiosError(error)) {
+        setError(`Error fetching message: ${(error as Error).message}`);
+      } else {
+        setError("An unknown error occurred");
+      }
       setMessage("");
     } finally {
       setIsLoading(false);
     }
   };
+  
 
   return (
     <div className="flex flex-col items-center space-y-4">
