@@ -63,6 +63,7 @@ async def process_data(request: TokenRequest):
         print(f"Error in /api/process: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.get("/api/download/{filename}")
 async def download_file(filename: str):
     file_path = os.path.join(TEMP_DOWNLOAD_DIR, filename)

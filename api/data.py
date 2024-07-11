@@ -5,13 +5,12 @@ from PIL import Image
 from .api import MMLabsAPI
 from .exceptions import MMLabsException
 
-
 class MMLabsData:
     """
     MMLabs Data class
     """
 
-    def __init__(self, api=None, data_dir="data/", offline_mode=False):
+    def __init__(self, api=None, data_dir=None, offline_mode=False):
         """
         constructor
         
@@ -23,6 +22,8 @@ class MMLabsData:
             self.api = MMLabsAPI()
         else:
             self.api = api
+        if data_dir is None:
+            data_dir = "/tmp/data"  # Use /tmp directory for temporary storage
         self.data_dir = data_dir
         self.set_data_dir(data_dir)
         self.offline_mode = offline_mode
