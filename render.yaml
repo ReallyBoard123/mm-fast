@@ -1,3 +1,6 @@
+build:
+  - pnpm/install
+
 services:
   - type: web
     name: nextjs-frontend
@@ -10,6 +13,8 @@ services:
         value: production
       - key: NEXT_PUBLIC_API_URL
         value: https://fastapi-backend-qh6a.onrender.com/api
+      - key: NEXT_TELEMETRY_DISABLED
+        value: "1"
 
   - type: web
     name: fastapi-backend
