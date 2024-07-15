@@ -55,7 +55,7 @@ export function APIForm() {
     } catch (error) {
       console.error("Error:", error)
       if (axios.isAxiosError(error)) {
-        setLogs((prevLogs) => [...prevLogs, error.message])
+        setLogs((prevLogs) => [...prevLogs, (error as Error).message])
       } else {
         setLogs((prevLogs) => [...prevLogs, "An unknown error occurred"])
       }
