@@ -55,7 +55,7 @@ export function APIForm() {
     } catch (error) {
       console.error("Error:", error)
       if (axios.isAxiosError(error)) {
-        setLogs((prevLogs) => [...prevLogs, (error as Error).message])
+        setLogs((prevLogs) => [...prevLogs, error.message])
       } else {
         setLogs((prevLogs) => [...prevLogs, "An unknown error occurred"])
       }
@@ -63,7 +63,6 @@ export function APIForm() {
       setLoading(false)
     }
   }
-  
 
   return (
     <div className="space-y-8">
