@@ -1,39 +1,34 @@
-import csv
 import traceback
-from .measurement_processing import *   
+from .measurement_processing import * 
+import pandas as pd  
 import numpy as np
 import os
+import logging
+from pathlib import Path
+from datetime import datetime
+
+logging.basicConfig(level=logging.INFO)
 
 def get_multi_dim_id_series(*time_series, append_final_timestamp=True):
-    diffs = []
-    for ts in time_series:
-        if not isinstance(ts, np.ndarray):
-            ts = np.array(ts)
-        if ts.dtype != object:
-            diff = np.where(~((ts[:-1] == ts[1:]) | (np.isnan(ts[:-1]) & np.isnan(ts[1:]))))[0]
-        else:
-            diff = np.where(~(ts[:-1] == ts[1:]))[0]
-        diffs.append(diff + 1)  # Adding 1 to align with the start of changes
-
-    d_diffs = np.unique(np.concatenate(diffs))
-    timestamps = np.insert(d_diffs, 0, 0)  # Ensure start is included
+    diffs = [np.where(ts[:-1] != ts[1:])[0] + 1 for ts in time_series]
+    timestamps = np.unique(np.concatenate(diffs))
+    timestamps = np.insert(timestamps, 0, 0)
     id_series = list(zip(*[ts[timestamps] for ts in time_series]))
-
+    
     if append_final_timestamp:
-        timestamps = np.append(timestamps, len(time_series[0]))  # Ensure end is included
-
+        timestamps = np.append(timestamps, len(time_series[0]))
+    
     return id_series, timestamps
 
 def time_from_iso_to_seconds(iso_str):
-    time_str = iso_str.split('T')[1].split('+')[0]  # Extract HH:MM:SS.ssssss
-    h, m, s = map(float, time_str.split(':'))
-    return int(h) * 3600 + int(m) * 60 + s
+    dt = datetime.fromisoformat(iso_str.replace('Z', '+00:00'))
+    return dt.hour * 3600 + dt.minute * 60 + dt.second + dt.microsecond / 1e6
 
 def extract_measurement_data(data, selected_measurement_metadata, folder_path):
     try:
         set_id = selected_measurement_metadata['set_id']
         baseTime = selected_measurement_metadata['timestamp']
-        base_seconds = time_from_iso_to_seconds(selected_measurement_metadata['timestamp'])
+        base_seconds = time_from_iso_to_seconds(baseTime)
 
         region_uuid_to_name = {r['uuid']: r['name'] for r in data.processes[data.selected_process]["layout"]["regions"]}
         region_label_uuid_to_name = {r['uuid']: r['name'] for r in data.processes[data.selected_process]["layout"]["region_labels"]}
@@ -53,47 +48,102 @@ def extract_measurement_data(data, selected_measurement_metadata, folder_path):
 
         id_series, timestamps = get_multi_dim_id_series(region_timeseries, base_act_ts, region_label_ts_data, step_ts, handling_heights_ts)
 
-        start_timestamps = timestamps[:-1]  # Exclude the last timestamp for start times
-        end_timestamps = timestamps[1:]  # Exclude the first timestamp for end times
+        start_timestamps = timestamps[:-1]
+        end_timestamps = timestamps[1:]
 
-        region_name_series = [region_uuid_to_name.get(entry[0], "Unknown Region") for entry in id_series]
-        base_act_name_series = [base_act_id_to_name_map.get(entry[1], "Unknown Activity") for entry in id_series]
-        region_label_series = [region_label_uuid_to_name.get(entry[2], "Unknown Label") for entry in id_series]
-        handling_heights_series = [handling_height_id_to_name_map.get(entry[4], "Unknown Height") for entry in id_series]
+        df = pd.DataFrame({
+            "Measurement ID": set_id,
+            "Start Time(seconds)": start_timestamps / 100 + base_seconds,
+            "End Time (seconds)": end_timestamps / 100 + base_seconds,
+            "Region": [region_uuid_to_name.get(entry[0], "Unknown Region") for entry in id_series],
+            "Activity": [base_act_id_to_name_map.get(entry[1], "Unknown Activity") for entry in id_series],
+            "Region Label": [region_label_uuid_to_name.get(entry[2], "Unknown Label") for entry in id_series],
+            "Total Steps": num_steps,
+            "Handling Height": [handling_height_id_to_name_map.get(entry[4], "Unknown Height") for entry in id_series]
+        })
 
-        total_walking_duration = 0
-        filtered_rows = []
+        df["Duration"] = df["End Time (seconds)"] - df["Start Time(seconds)"]
+        total_walking_duration = df[df["Activity"] == "Walk"]["Duration"].sum()
 
-        for i in range(len(id_series)):
-            start_time_seconds = round((start_timestamps[i] / 100) + base_seconds, 3)
-            end_time_seconds = round((end_timestamps[i] / 100) + base_seconds, 3)
-            duration_seconds = end_time_seconds - start_time_seconds
-
-            handling_height = handling_heights_series[i]
-
-            row = (
-                set_id, start_time_seconds, end_time_seconds, region_name_series[i],
-                base_act_name_series[i], region_label_series[i], num_steps,
-                handling_height
-            )
-
-            if base_act_name_series[i] == "Walk":
-                total_walking_duration += duration_seconds
-
-            filtered_rows.append(row)
-
-        csv_file_path = os.path.join(folder_path, f"{set_id}_{baseTime}.csv")
-        with open(csv_file_path, "w") as f:
-            csv_writer = csv.writer(f)
-            csv_writer.writerow([
-                "Measurement ID", "Start Time(seconds)", "End Time (seconds)", "Region",
-                "Activity", "Region Label", "Total Steps", "Handling Height"
-            ])
-            for row in filtered_rows:
-                csv_writer.writerow(row)
+        csv_file_path = Path(folder_path) / f"{set_id}_{baseTime}.csv"
+        df.to_csv(csv_file_path, index=False)
 
         print(f"Data saved to {csv_file_path}")
 
     except Exception as e:
         print(f"An error occurred: {e}")
+        traceback.print_exc()
+
+def generate_beacon_summary(df):
+    if df.empty:
+        return pd.DataFrame()
+
+    df['Duration'] = df['End Time (seconds)'] - df['Start Time(seconds)']
+    summary = df.groupby(['Measurement ID', 'Beacon Closeness', 'Beacon Usage'])['Duration'].sum().reset_index()
+    return summary
+
+def extract_dynamic_beacon_data(data, selected_measurement_metadata, root_folder_path):
+    try:
+        set_id = selected_measurement_metadata['set_id']
+        baseTime = selected_measurement_metadata['timestamp']
+        base_seconds = time_from_iso_to_seconds(baseTime)
+
+        date_folder_name = baseTime.split("T")[0]
+        fp = Path(data.get_measurement_dir_path(data.selected_process, data.selected_measurement))
+
+        if not fp.exists():
+            logging.error(f"Measurement directory not found: {fp}")
+            return
+
+        try:
+            region_timeseries = get_region_ts_for_measurement(fp)
+            closeness_arr, usage_arr, beacon_uuids = get_dynamic_beacon_data_for_measurement(fp)
+        except FileNotFoundError as e:
+            logging.error(f"Required data file not found: {e}")
+            return
+        except Exception as e:
+            logging.error(f"Error retrieving data: {str(e)}")
+            return
+
+        beacon_uuid_to_name = {beacon['uuid']: beacon['comment'] for beacon in data.processes[data.selected_process]["layout"]["dynamic_beacons"]}
+
+        dynamic_beacon_dir = Path(root_folder_path) / date_folder_name / "dynamic_beacons"
+        dynamic_beacon_dir.mkdir(parents=True, exist_ok=True)
+
+        timestamps = np.arange(len(closeness_arr)) / 100 + base_seconds
+        start_times = timestamps[:-1]
+        end_times = timestamps[1:]
+
+        for beacon_idx, beacon_uuid in enumerate(beacon_uuids):
+            beacon_name = beacon_uuid_to_name.get(beacon_uuid, f"beacon_{beacon_uuid}")
+            beacon_file_path = dynamic_beacon_dir / f"{beacon_name}.csv"
+            beacon_summary_path = dynamic_beacon_dir / f"{beacon_name}_summary.csv"
+
+            df = pd.DataFrame({
+                "Start Time(seconds)": start_times,
+                "End Time (seconds)": end_times,
+                "Beacon Closeness": closeness_arr[:-1, beacon_idx],
+                "Beacon Usage": usage_arr[:-1, beacon_idx],
+                "Measurement ID": set_id
+            })
+
+            df = df[(df["Beacon Closeness"] | df["Beacon Usage"])]
+
+            if not df.empty:
+                # Save detailed data
+                df.to_csv(beacon_file_path, mode='a', index=False, header=not beacon_file_path.exists())
+
+                # Generate and save summary for this specific beacon
+                summary_df = generate_beacon_summary(df)
+                if not summary_df.empty:
+                    summary_df.to_csv(beacon_summary_path, mode='a', index=False, header=not beacon_summary_path.exists())
+                
+                logging.info(f"Data and summary for beacon {beacon_name} saved successfully.")
+            else:
+                logging.info(f"No data for beacon {beacon_name}")
+
+        logging.info(f"Data extraction and summary generation for dynamic beacons on {date_folder_name} completed successfully.")
+
+    except Exception as e:
+        logging.error(f"An error occurred while extracting dynamic beacon data: {e}")
         traceback.print_exc()

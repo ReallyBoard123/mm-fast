@@ -1,4 +1,4 @@
-from .extract_data import extract_measurement_data
+from .extract_data import extract_measurement_data, extract_dynamic_beacon_data
 from .data import MMLabsData
 import pandas as pd
 import os
@@ -40,21 +40,41 @@ def list_measurements(data, process_uuid):
         traceback.print_exc()
         return None
 
-def extract_data(data, process_uuid, folder_path):
+def extract_data(data, process_uuid, root_folder_path):
     logs = io.StringIO()
     measurements_df = list_measurements(data, process_uuid)
+    
     if measurements_df is not None:
         with redirect_stdout(logs):
             for measurement in measurements_df.itertuples():
                 data.selected_measurement = measurement.uuid
                 try:
-                    selected_measurement_metadata = next(m for m in data.get_api_measurements(process_uuid) if m["uuid"] == data.selected_measurement)
-                    measurement_name = getattr(measurement, "name", None) or measurement.uuid
-                    measurement_folder_path = os.path.join(folder_path, process_uuid, measurement_name)
+                    # Get metadata for the selected measurement
+                    selected_measurement_metadata = next(
+                        m for m in data.get_api_measurements(process_uuid) 
+                        if m["uuid"] == data.selected_measurement
+                    )
+                    
+                    # Extract the date and sensor set id from the metadata
+                    measurement_date = selected_measurement_metadata['timestamp'][:10]  # Extract date as 'YYYY-MM-DD'
+                    sensor_set_id = selected_measurement_metadata['set_id']  # Get the sensor set ID
+                    
+                    # Define the folder structure
+                    measurement_folder_path = os.path.join(
+                        root_folder_path, measurement_date, sensor_set_id
+                    )
                     os.makedirs(measurement_folder_path, exist_ok=True)
-                    print(f"Processing measurement {measurement_name}...")
+                    
+                    print(f"Processing measurement {sensor_set_id} on {measurement_date}...")
+
+                    # Extract sensor data
                     extract_measurement_data(data, selected_measurement_metadata, measurement_folder_path)
+                    
+                    # Extract dynamic beacon data, passing the date folder for consolidation
+                    extract_dynamic_beacon_data(data, selected_measurement_metadata, os.path.join(root_folder_path, measurement_date))
+                    
                 except Exception as e:
                     print(f"Error extracting data for measurement {measurement.uuid}: {e}")
                     traceback.print_exc()
+    
     return logs.getvalue().split('\n')
