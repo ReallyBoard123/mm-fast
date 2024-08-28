@@ -108,26 +108,30 @@ def extract_measurement_data(data, selected_measurement_metadata, folder_path):
         traceback.print_exc()
 
 def create_summary_dataframe(df, start_time):
-    def combine_rows(group):
-        return pd.Series({
-            'Start Time': group['Start Time'].iloc[0],
-            'End Time': group['End Time'].iloc[-1],
-            'Region': group['Region'].iloc[0],
-            'Activity': group['Activity'].iloc[0],
-            'Region Label': group['Region Label'].iloc[0],
-            'Duration': (group['End Time'].iloc[-1] - group['Start Time'].iloc[0]).total_seconds()
-        })
-
     # Convert seconds to datetime
     df['Start Time'] = start_time + pd.to_timedelta(df['Start Time(seconds)'] - df['Start Time(seconds)'].iloc[0], unit='s')
     df['End Time'] = start_time + pd.to_timedelta(df['End Time (seconds)'] - df['Start Time(seconds)'].iloc[0], unit='s')
 
-    # Group by changes in Region or Activity
-    grouped = df.groupby((df['Region'].shift() != df['Region']) | (df['Activity'].shift() != df['Activity'])).cumcount()
-    summary_df = df.groupby(grouped).apply(combine_rows).reset_index(drop=True)
+    summary_rows = []
+    current_row = None
 
+    for _, row in df.iterrows():
+        if current_row is None or row['Region'] != current_row['Region'] or row['Activity'] != current_row['Activity']:
+            if current_row is not None:
+                current_row['End Time'] = prev_row['End Time']
+                current_row['Duration'] = (current_row['End Time'] - current_row['Start Time']).total_seconds()
+                summary_rows.append(current_row)
+            current_row = row.to_dict()
+        prev_row = row
+
+    # Add the last row
+    if current_row is not None:
+        current_row['End Time'] = prev_row['End Time']
+        current_row['Duration'] = (current_row['End Time'] - current_row['Start Time']).total_seconds()
+        summary_rows.append(current_row)
+
+    summary_df = pd.DataFrame(summary_rows)
     return summary_df[['Start Time', 'End Time', 'Region', 'Activity', 'Region Label', 'Duration']]
-
 def generate_beacon_summary(df):
     if df.empty:
         return pd.DataFrame()
