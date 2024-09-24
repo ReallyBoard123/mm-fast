@@ -49,17 +49,14 @@ def extract_data(data, process_uuid, root_folder_path):
             for measurement in measurements_df.itertuples():
                 data.selected_measurement = measurement.uuid
                 try:
-                    # Get metadata for the selected measurement
                     selected_measurement_metadata = next(
                         m for m in data.get_api_measurements(process_uuid) 
                         if m["uuid"] == data.selected_measurement
                     )
                     
-                    # Extract the date and sensor set id from the metadata
-                    measurement_date = selected_measurement_metadata['timestamp'][:10]  # Extract date as 'YYYY-MM-DD'
-                    sensor_set_id = selected_measurement_metadata['set_id']  # Get the sensor set ID
+                    measurement_date = selected_measurement_metadata['timestamp'][:10]
+                    sensor_set_id = selected_measurement_metadata['set_id']
                     
-                    # Define the folder structure
                     measurement_folder_path = os.path.join(
                         root_folder_path, measurement_date, sensor_set_id
                     )
@@ -67,10 +64,10 @@ def extract_data(data, process_uuid, root_folder_path):
                     
                     print(f"Processing measurement {sensor_set_id} on {measurement_date}...")
 
-                    # Extract sensor data
+                    # Extract raw sensor and handling data
                     extract_measurement_data(data, selected_measurement_metadata, measurement_folder_path)
                     
-                    # Extract dynamic beacon data, passing the date folder for consolidation
+                    # Extract dynamic beacon data
                     extract_dynamic_beacon_data(data, selected_measurement_metadata, os.path.join(root_folder_path, measurement_date))
                     
                 except Exception as e:

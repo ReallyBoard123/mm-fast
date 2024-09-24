@@ -1,137 +1,145 @@
 import traceback
-from .measurement_processing import * 
-import pandas as pd  
+from .measurement_processing import *
+import pandas as pd
 import numpy as np
 import logging
 from pathlib import Path
 import pytz
 from datetime import datetime, timedelta
+import pickle
+import gzip
+import os
+from decimal import Decimal, ROUND_HALF_UP
 
 logging.basicConfig(level=logging.INFO)
 
+ACTIVITY_TRANSLATION_KEY_TO_NAME = {
+    'HUMAN_ACT.WALK': 'Walk',
+    'HUMAN_ACT.OTHER': 'Unknown',
+    'HUMAN_ACT.STAND': 'Stand',
+    'HUMAN_ACT.HANDLE': 'Handling',
+    'HUMAN_ACT.DRIVE': 'Drive',
+    'HUMAN_ACT.NO_HANDLE': 'No Handling',
+    'HUMAN_ACT.HANDLE_UP': 'Handle up',
+    'HUMAN_ACT.HANDLE_CENTER': 'Handle center',
+    'HUMAN_ACT.HANDLE_DOWN': 'Handle down'
+}
+
+def load_pickle(file_path):
+    with open(file_path, 'rb') as f:
+        return pickle.load(f)
+
+def load_gzip_pickle(file_path):
+    with gzip.open(file_path, 'rb') as f:
+        return pickle.load(f)
+
+def time_from_iso_to_seconds(iso_str):
+    dt = datetime.fromisoformat(iso_str.replace('Z', '+00:00'))
+    return dt.hour * 3600 + dt.minute * 60 + dt.second + dt.microsecond / 1e6
+
+def round_to_3_decimals(value):
+    return Decimal(value).quantize(Decimal('0.001'), rounding=ROUND_HALF_UP)
 
 def get_custom_handling_height_mapping(measurement_file_path):
     id_to_name_map, _ = get_handling_heights_plot_info(measurement_file_path)
     id_to_name_map[6] = "No Handle"  # or whatever is appropriate based on consultation
     return id_to_name_map
 
-def get_multi_dim_id_series(*time_series, append_final_timestamp=True):
-    diffs = [np.where(ts[:-1] != ts[1:])[0] + 1 for ts in time_series]
-    timestamps = np.unique(np.concatenate(diffs))
-    timestamps = np.insert(timestamps, 0, 0)
-    id_series = list(zip(*[ts[timestamps] for ts in time_series]))
-    
-    if append_final_timestamp:
-        timestamps = np.append(timestamps, len(time_series[0]))
-    
-    return id_series, timestamps
+def process_measurement_data(measurement_file_path, process_metadata, base_seconds):
+    date_data = load_pickle(os.path.join(measurement_file_path, 'date_data.pickle'))
+    hour_data = load_pickle(os.path.join(measurement_file_path, 'hour_of_day_data.pickle'))
+    region_data = load_pickle(os.path.join(measurement_file_path, 'region_ts_data.pickle'))
+    activity_data = load_pickle(os.path.join(measurement_file_path, 'unified_har_data.pickle'))
+    shift_data = load_gzip_pickle(os.path.join(measurement_file_path, 'shift_data.pickle.gz'))
+    handling_heights_data = activity_data
 
-def time_from_iso_to_seconds(iso_str):
-    dt = datetime.fromisoformat(iso_str.replace('Z', '+00:00'))
-    return dt.hour * 3600 + dt.minute * 60 + dt.second + dt.microsecond / 1e6
+    start_date = date_data['data']['id_series'][0]
+    base_date = datetime.combine(start_date, datetime.min.time())
+
+    region_ts = region_data['data']['id_series']
+    region_timestamps = region_data['data']['timestamps']
+
+    activity_ts = activity_data['data'][1]['act_id_ts']['id_series']
+    activity_timestamps = activity_data['data'][1]['act_id_ts']['timestamps']
+
+    shift_arr = shift_data['data']['shift_arr']
+    shift_uuids = shift_data['data']['uuids']
+
+    hour_ts = hour_data['data']['id_series']
+    hour_timestamps = hour_data['data']['timestamps']
+
+    handling_heights_ts = handling_heights_data['data'][2]['act_id_ts']['id_series']
+    handling_heights_timestamps = handling_heights_data['data'][2]['act_id_ts']['timestamps']
+
+    df = pd.DataFrame({
+        'timestamp': [base_date + timedelta(seconds=t/100) for t in range(len(shift_arr))],
+        'hour': np.repeat(hour_ts, np.diff(hour_timestamps)),
+        'shift': [shift_uuids[np.where(row)[0][0]] if np.any(row) else None for row in shift_arr],
+        'region': np.repeat(region_ts, np.diff(region_timestamps)),
+        'activity': np.repeat(activity_ts, np.diff(activity_timestamps)),
+        'handling_height': np.repeat(handling_heights_ts, np.diff(handling_heights_timestamps))
+    })
+
+    region_uuid_to_name = {r['uuid']: r['name'] for r in process_metadata['layout']['regions']}
+    df['region_name'] = df['region'].map(region_uuid_to_name).fillna('Unknown Region')
+
+    activity_id_to_key = {act['id']: act['translation_key'] for act in activity_data['data'][1]['available_acts']}
+    df['activity_name'] = df['activity'].map(activity_id_to_key).map(ACTIVITY_TRANSLATION_KEY_TO_NAME)
+
+    handling_height_mapping = get_custom_handling_height_mapping(measurement_file_path)
+    df['handling_height_name'] = df['handling_height'].map(handling_height_mapping)
+
+    df['Start Time'] = df['timestamp'].dt.hour * 3600 + df['timestamp'].dt.minute * 60 + df['timestamp'].dt.second + df['timestamp'].dt.microsecond / 1e6 + base_seconds
+    df['End Time'] = df['Start Time'] + 0.01
+
+    df['Start Time'] = df['Start Time'].apply(round_to_3_decimals)
+    df['End Time'] = df['End Time'].apply(round_to_3_decimals)
+
+    return df
 
 def extract_measurement_data(data, selected_measurement_metadata, folder_path):
     try:
         set_id = selected_measurement_metadata['set_id']
         baseTime = selected_measurement_metadata['timestamp']
         
-        # Convert UTC time to Germany time (CEST)
         utc_time = datetime.fromisoformat(baseTime.replace('Z', '+00:00'))
         germany_tz = pytz.timezone('Europe/Berlin')
         local_time = utc_time.astimezone(germany_tz)
         
-        # Format the local time for the filename
-        local_time_str = local_time.isoformat()
+        local_time_str = local_time.strftime("%Y-%m-%dT%H_%M_%S.%f%z")
 
         base_seconds = time_from_iso_to_seconds(baseTime)
 
-        region_uuid_to_name = {r['uuid']: r['name'] for r in data.processes[data.selected_process]["layout"]["regions"]}
-        region_label_uuid_to_name = {r['uuid']: r['name'] for r in data.processes[data.selected_process]["layout"]["region_labels"]}
-
         fp = data.get_measurement_dir_path(data.selected_process, data.selected_measurement)
-
-        region_timeseries = get_region_ts_for_measurement(fp)
-        base_act_ts = get_base_activitiy_ts_for_measurement(fp)
-        region_label_ts_data = get_region_label_ts_for_measurement(fp)
-        step_ts = get_step_ts_for_measurement(fp)
-        handling_heights_ts = get_handling_heights_ts_for_measurement(fp)
-
-        base_act_id_to_name_map, _ = get_base_activity_plot_info(fp)
-        handling_height_id_to_name_map = get_custom_handling_height_mapping(fp)
-
-        id_series, timestamps = get_multi_dim_id_series(region_timeseries, base_act_ts, region_label_ts_data, step_ts, handling_heights_ts)
-
-        start_timestamps = timestamps[:-1]
-        end_timestamps = timestamps[1:]
+        
+        df = process_measurement_data(fp, data.processes[data.selected_process], base_seconds)
 
         # Main sensor data
-        sensor_df = pd.DataFrame({
-            "Measurement ID": set_id,
-            "Start Time(seconds)": start_timestamps / 100 + base_seconds,
-            "End Time (seconds)": end_timestamps / 100 + base_seconds,
-            "Region": [region_uuid_to_name.get(entry[0], "Unknown Region") for entry in id_series],
-            "Activity": [base_act_id_to_name_map.get(entry[1], "Unknown Activity") for entry in id_series],
-            "Region Label": [region_label_uuid_to_name.get(entry[2], "Unknown Label") for entry in id_series]
-        })
+        sensor_df = df[['Start Time', 'End Time', 'region_name', 'activity_name']].copy()
+        sensor_df.columns = ['Start Time', 'End Time', 'Region', 'Activity']
+        sensor_df['Set ID'] = set_id
+        sensor_df = sensor_df[['Set ID', 'Start Time', 'End Time', 'Region', 'Activity']]
 
-        sensor_df["Duration"] = sensor_df["End Time (seconds)"] - sensor_df["Start Time(seconds)"]
         # Handling data
-        handling_df = pd.DataFrame({
-            "Measurement ID": set_id,
-            "Start Time(seconds)": start_timestamps / 100 + base_seconds,
-            "End Time (seconds)": end_timestamps / 100 + base_seconds,
-            "Handling Height": [handling_height_id_to_name_map.get(entry[4], f"Unknown Height ({entry[4]})") for entry in id_series]
-        })
+        handling_df = df[['Start Time', 'End Time', 'region_name', 'handling_height_name']].copy()
+        handling_df.columns = ['Start Time', 'End Time', 'Region', 'Handle Position']
+        handling_df['Set ID'] = set_id
+        handling_df = handling_df[['Set ID', 'Handle Position', 'Start Time', 'End Time', 'Region']]
 
-        handling_df["Duration"] = handling_df["End Time (seconds)"] - handling_df["Start Time(seconds)"]
-        
-
-        # Save the original detailed CSV
-        sensor_csv_file_path = Path(folder_path) / f"{set_id}_{local_time_str}_detailed.csv"
+        # Save the detailed CSVs
+        sensor_csv_file_path = Path(folder_path) / f"{set_id}_{local_time_str}_sensor_raw.csv"
         sensor_df.to_csv(sensor_csv_file_path, index=False)
 
-        handling_csv_path = Path(folder_path, f"{set_id}_{local_time_str}_handling.csv")
+        handling_csv_path = Path(folder_path) / f"{set_id}_{local_time_str}_handling_raw.csv"
         handling_df.to_csv(handling_csv_path, index=False)
-        
-        # Create the summary DataFrame
-        summary_df = create_summary_dataframe(sensor_df, local_time)
 
-        # Save the summary CSV
-        summary_csv_path = Path(folder_path) / f"{set_id}_{local_time_str}_summary.csv"
-        summary_df.to_csv(summary_csv_path, index=False)
-
-        print(f"Detailed data saved to {sensor_csv_file_path}")
-        print(f"Summary data saved to {summary_csv_path}")
+        print(f"Sensor raw data saved to {sensor_csv_file_path}")
+        print(f"Handling raw data saved to {handling_csv_path}")
 
     except Exception as e:
         print(f"An error occurred: {e}")
         traceback.print_exc()
 
-def create_summary_dataframe(df, start_time):
-    # Convert seconds to datetime
-    df['Start Time'] = start_time + pd.to_timedelta(df['Start Time(seconds)'] - df['Start Time(seconds)'].iloc[0], unit='s')
-    df['End Time'] = start_time + pd.to_timedelta(df['End Time (seconds)'] - df['Start Time(seconds)'].iloc[0], unit='s')
-
-    summary_rows = []
-    current_row = None
-
-    for _, row in df.iterrows():
-        if current_row is None or row['Region'] != current_row['Region'] or row['Activity'] != current_row['Activity']:
-            if current_row is not None:
-                current_row['End Time'] = prev_row['End Time']
-                current_row['Duration'] = (current_row['End Time'] - current_row['Start Time']).total_seconds()
-                summary_rows.append(current_row)
-            current_row = row.to_dict()
-        prev_row = row
-
-    # Add the last row
-    if current_row is not None:
-        current_row['End Time'] = prev_row['End Time']
-        current_row['Duration'] = (current_row['End Time'] - current_row['Start Time']).total_seconds()
-        summary_rows.append(current_row)
-
-    summary_df = pd.DataFrame(summary_rows)
-    return summary_df[['Start Time', 'End Time', 'Region', 'Activity', 'Region Label', 'Duration']]
 def generate_beacon_summary(df):
     if df.empty:
         return pd.DataFrame()
