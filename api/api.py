@@ -1,3 +1,9 @@
+"""
+@created: 13.07.2021
+@copyright: Motion Miners GmbH, Emil-Figge Str. 80, 44227 Dortmund, 2021
+
+@brief: MMLabsAPI class
+"""
 
 import requests
 from .exceptions import MMLabsException
@@ -8,7 +14,7 @@ class MMLabsAPI:
     MMLabs API calls
     """
 
-    def __init__(self, base_url='https://mpi.motionminers.com/api/4labs/v1/', token=None):
+    def __init__(self, base_url='https://mpi.motionminers.com/api/4labs/v2/', token=None):
         """
         constructor
         

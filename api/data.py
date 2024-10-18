@@ -1,19 +1,28 @@
+"""
+@created: 13.07.2021
+@copyright: Motion Miners GmbH, Emil-Figge Str. 80, 44227 Dortmund, 2021
+
+@brief: MMLabsData class
+"""
+
 import pathlib
 import os
 import json
+import threading
 from PIL import Image
 from .api import MMLabsAPI
 from .exceptions import MMLabsException
+
 
 class MMLabsData:
     """
     MMLabs Data class
     """
 
-    def __init__(self, api=None, data_dir=None, offline_mode=False):
+    def __init__(self, api=None, data_dir="data/", offline_mode=False, verbose=False):
         """
         constructor
-        
+
         :param api: The MMLabs API instance object
         :param data_dir: The caching data dir
         :param offline_mode: enable offline use
@@ -22,8 +31,7 @@ class MMLabsData:
             self.api = MMLabsAPI()
         else:
             self.api = api
-        if data_dir is None:
-            data_dir = "/tmp/data"  # Use /tmp directory for temporary storage
+        self.verbose = verbose
         self.data_dir = data_dir
         self.set_data_dir(data_dir)
         self.offline_mode = offline_mode
@@ -90,7 +98,8 @@ class MMLabsData:
                 process_uuid = None
 
                 if pathlib.Path(metadata_filename).is_file():
-                    print("found process directory %s" % dp.name)
+                    if self.verbose:
+                        print("found process directory %s" % dp.name)
 
                     with open(metadata_filename, 'r') as file:
                         process_metadata = json.load(file)
@@ -101,7 +110,8 @@ class MMLabsData:
                     # scan for token
                     token_filename = dp.path + "/token.json"
                     if pathlib.Path(token_filename).is_file():
-                        print("reading token...")
+                        if self.verbose:
+                            print("reading token...")
                         with open(token_filename, 'r') as file:
                             token = json.load(file)
                             self.tokens[process_uuid] = token
@@ -111,7 +121,8 @@ class MMLabsData:
                     # scan for local measurements
                     measurements_filename = dp.path + "/measurements.json"
                     if pathlib.Path(measurements_filename).is_file():
-                        print("reading local measurements...")
+                        if self.verbose:
+                            print("reading local measurements...")
 
                         with open(measurements_filename, 'r') as file:
                             process_measurements = json.load(file)
@@ -121,13 +132,16 @@ class MMLabsData:
                         process_dir = self.data_dir + '/' + process_uuid
                         for m in self.measurements[process_uuid]:
                             measurement_dir = process_dir + '/' + m["uuid"]
-                            pathlib.Path(measurement_dir).mkdir(parents=True, exist_ok=True)
+                            pathlib.Path(measurement_dir).mkdir(
+                                parents=True, exist_ok=True)
 
                             # mark measurement as not offline available (default)
                             m["offline"] = False
 
                             if not m["is_complete"]:
-                                print("skipping measurement %s, as it is not yet completed" % (m["uuid"]))
+                                if self.verbose:
+                                    print(
+                                        "skipping measurement %s, as it is not yet completed" % (m["uuid"]))
                                 # ToDo: check if start time is far away and mark as dead or zombie
                                 continue
 
@@ -135,16 +149,19 @@ class MMLabsData:
                                 filename = measurement_dir + '/' + f
                                 # test if file already exists
                                 if pathlib.Path(filename).is_file():
-                                    print("skipping measurement %s file %s (cached)..." % (m["uuid"], f))
+                                    if self.verbose:
+                                        print("skipping measurement %s file %s (cached)..." % (
+                                            m["uuid"], f))
                                     m["offline"] = True
                     else:
-                        print("No local measurements for process %s found!" % process_uuid)
+                        print("No local measurements for process %s found!" %
+                              process_uuid)
 
     def get_api_all_data(self, process_uuid, use_cache=True):
         """
         Get all data from API and prepare datastructures.
         Set initial API token first.
-        
+
         :param process_uuid: the process uuid to retrieve all data from
         :param use_cache: if True do not download file again if existing
         """
@@ -153,18 +170,29 @@ class MMLabsData:
             self.get_api_layout_image(process_uuid)
             self.get_api_measurements(process_uuid)
 
-            for m in self.measurements[process_uuid]:
-                if not m["is_complete"]:
-                    print("Skipping download, as measurement is not yet complete...")
-                    continue
-                self.get_api_all_measurement_files(process_uuid, m["uuid"], use_cache)
+            complete_measurements = [measurement for measurement in self.measurements[process_uuid] if measurement["is_complete"]]
+            print(f"Found {len(complete_measurements)} measurements to download.")
+
+            # Download measurements in parallel since we have a lot of small files to process
+            n = 5 # number of parallel connections
+            chunks = [complete_measurements[i * n:(i + 1) * n] for i in range((len(complete_measurements) + n - 1) // n )]
+            for chunk in chunks:
+                threads = []
+                for measurement in chunk:
+                    thread = threading.Thread(target=self.get_api_all_measurement_files, args=(process_uuid, measurement["uuid"], use_cache,))
+                    thread.start()
+                    threads.append(thread)
+                for thread in threads:
+                    thread.join()
+
+            print(f"Download completed.")
         else:
             raise MMLabsException("Disable offline mode first")
 
     def get_api_all_measurement_files(self, process_uuid, measurement_uuid, use_cache=True):
         """
         Download all measurement files for given uuids from API.
-        
+
         :param measurement_uuid: the measurement uuid to retrieve all data from
         :param process_uuid: the process uuid to retrieve all data from
         :param use_cache: if True do not download file again if existing
@@ -178,10 +206,13 @@ class MMLabsData:
             filename = measurement_dir + '/' + f
             # test if file already exists
             if pathlib.Path(filename).is_file() and use_cache:
-                print("skipping measurement %s file %s (cached)..." % (measurement_uuid, f))
+                if self.verbose:
+                    print("skipping measurement %s file %s (cached)..." %
+                          (measurement_uuid, f))
                 continue
-
-            print("downloading measurement %s file %s..." % (measurement_uuid, f))
+            if self.verbose:
+                print("downloading measurement %s file %s..." %
+                      (measurement_uuid, f))
             try:
                 fdata = self.api.get_measurement(measurement_uuid, f)
                 file = open(filename, 'wb')
@@ -194,7 +225,7 @@ class MMLabsData:
         """
         Add a (new) token for process data access. 
         Will try to retrieve process metadata from API and persist in local cache. 
-        
+
         :param token: the exported MPI access token (Base64)
         """
         if token is None:
@@ -233,17 +264,19 @@ class MMLabsData:
     def __set_api_token(self, process_uuid):
         """
         Set token which was added before for a specific process uuid for API access. 
-        
+
         :param process_uuid: the process uuid
         """
         token = self.tokens.get(process_uuid)
         if token is None:
-            raise MMLabsException("unable to find token for process %s" % process_uuid)
+            raise MMLabsException(
+                "unable to find token for process %s" % process_uuid)
         self.api.set_token(token["token"])
 
     def get_api_measurements(self, process_uuid):
         if process_uuid is None:
-            raise MMLabsException("API get_measurements: process uuid is not set!")
+            raise MMLabsException(
+                "API get_measurements: process uuid is not set!")
 
         self.__set_api_token(process_uuid)
         self.measurements[process_uuid] = self.api.get_measurements()
@@ -254,7 +287,8 @@ class MMLabsData:
 
     def get_api_process_metadata(self, process_uuid):
         if process_uuid is None:
-            raise MMLabsException("API get_process_metadata: process uuid is not set!")
+            raise MMLabsException(
+                "API get_process_metadata: process uuid is not set!")
         self.__set_api_token(process_uuid)
 
         self.processes[process_uuid] = self.api.get_process_metadata()
@@ -263,9 +297,25 @@ class MMLabsData:
             file.write(json.dumps(self.processes[process_uuid]))
         return self.processes[process_uuid]
 
+    def get_layout_image(self, process_uuid: str) -> bytes:
+        """
+        Get the associated layout image of the provided process. Note that this method
+        returns raw bytes containing the image data. Consult the examples to learn how
+        to use it.
+
+        Note:
+          This method is an alias for `get_api_layout_image`
+        
+        :param process_uuid: The process UUID oh which the layout shall be returned.
+
+        :return: The byte representation of the layout image.
+        """
+        return self.get_api_layout_image(process_uuid)
+    
     def get_api_layout_image(self, process_uuid):
         if process_uuid is None:
-            raise MMLabsException("API get_api_layout_image: process uuid is not set!")
+            raise MMLabsException(
+                "API get_api_layout_image: process uuid is not set!")
         self.__set_api_token(process_uuid)
 
         image_bytes = self.api.get_layout_image()
@@ -302,7 +352,7 @@ class MMLabsData:
         import pandas as pd
         return pd.DataFrame.from_dict(
             self.measurements[process_uuid]).set_index('timestamp').sort_index(ascending=False)
-        
+
     def __create_grayscale_image(self, path):
         # create grayscale image
         image_dir = os.path.dirname(path)

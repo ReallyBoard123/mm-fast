@@ -1,11 +1,12 @@
-import { APIForm } from "./components/APIForm";
-import MessageFetcher from "./components/MessageFetcher";
+import { TokenForm } from "@/components/TokenForm"
 
 export default function Home() {
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center p-8 space-y-4">
-      <MessageFetcher />
-      <APIForm />
-    </main>
-  );
+    <div className="container mx-auto p-4">
+      <div className="mb-8">
+        <h2 className="text-xl font-semibold mb-2">Process with Token</h2>
+        <TokenForm />
+      </div>
+    </div>
+  )
 }

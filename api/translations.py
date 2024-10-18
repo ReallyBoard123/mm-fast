@@ -1,3 +1,9 @@
+"""
+@created: 13.07.2021
+@copyright: Motion Miners GmbH, Emil-Figge Str. 80, 44227 Dortmund, 2021
+
+@brief: Human readable translations for keys received by the MMLabs api
+"""
 
 ACTIVITY_TRANSLATION_KEY_TO_NAME = {
     'HUMAN_ACT.WALK': 'Walk',
