@@ -132,21 +132,72 @@ def process_data(data: MMLabsData, process_uuid: str, output_dir: str):
     logger.debug(f"Finished processing all measurements")
     return logs
 
-def process_measurement(data: MMLabsData, process_uuid: str, measurement_uuid: str, output_dir: str):
+def process_data(data: MMLabsData, process_uuid: str, output_dir: str):
+    logs = []
+    process_base_dir = os.path.join(output_dir, process_uuid)
+    
+    # Save process metadata and layout once at process level
+    metadata_path = os.path.join(process_base_dir, 'process_metadata.json')
+    layout_path = os.path.join(process_base_dir, 'layout.png')
+    os.makedirs(process_base_dir, exist_ok=True)
+    
+    if not os.path.exists(metadata_path):
+        with open(metadata_path, 'w') as f:
+            json.dump(data.processes[process_uuid], f, indent=2)
+            logger.debug(f"Saved process metadata: {metadata_path}")
+            logs.append(f"Saved process metadata: {metadata_path}")
+            
+    if not os.path.exists(layout_path):
+        layout_bytes = data.get_layout_image(process_uuid)
+        with open(layout_path, 'wb') as f:
+            f.write(layout_bytes)
+            logger.debug(f"Saved layout image: {layout_path}")
+            logs.append(f"Saved layout image: {layout_path}")
+
+    for measurement in data.measurements.get(process_uuid, []):
+        measurement_uuid = measurement['uuid']
+        logs.extend(process_measurement(data, process_uuid, measurement_uuid, process_base_dir))
+
+    return logs
+
+def process_data(data: MMLabsData, process_uuid: str, output_dir: str):
+    logs = []
+    process_base_dir = os.path.join(output_dir, process_uuid)
+    
+    # Save process metadata and layout once at process level
+    metadata_path = os.path.join(process_base_dir, 'process_metadata.json')
+    layout_path = os.path.join(process_base_dir, 'layout.png')
+    os.makedirs(process_base_dir, exist_ok=True)
+    
+    if not os.path.exists(metadata_path):
+        with open(metadata_path, 'w') as f:
+            json.dump(data.processes[process_uuid], f, indent=2)
+            logger.debug(f"Saved process metadata: {metadata_path}")
+            logs.append(f"Saved process metadata: {metadata_path}")
+            
+    if not os.path.exists(layout_path):
+        layout_bytes = data.get_layout_image(process_uuid)
+        with open(layout_path, 'wb') as f:
+            f.write(layout_bytes)
+            logger.debug(f"Saved layout image: {layout_path}")
+            logs.append(f"Saved layout image: {layout_path}")
+
+    for measurement in data.measurements.get(process_uuid, []):
+        measurement_uuid = measurement['uuid']
+        logs.extend(process_measurement(data, process_uuid, measurement_uuid, process_base_dir))
+
+    return logs
+
+def process_measurement(data: MMLabsData, process_uuid: str, measurement_uuid: str, process_base_dir: str):
     logs = []
     measurement_path = data.get_measurement_dir_path(process_uuid, measurement_uuid)
-    
     logger.debug(f"Processing measurement: {measurement_uuid}")
-    logger.debug(f"Measurement path: {measurement_path}")
-    logger.debug(f"Output directory: {output_dir}")
 
+    # Get measurement data
     base_act_ts = get_base_activitiy_ts_for_measurement(measurement_path, remove_pauses=False)
     region_ts = get_region_ts_for_measurement(measurement_path, remove_pauses=False)
     handling_heights_ts = get_handling_heights_ts_for_measurement(measurement_path, remove_pauses=False)
-
-    logger.debug(f"Base activity time series shape: {base_act_ts.shape}")
-    logger.debug(f"Region time series shape: {region_ts.shape}")
-    logger.debug(f"Handling heights time series shape: {handling_heights_ts.shape}")
+    pause_ts = get_pause_ts_for_measurement(measurement_path)
 
     region_uuid_to_name = {r['uuid']: r['name'] for r in data.processes[process_uuid]["layout"]["regions"]}
     activity_id_to_name_map, _ = get_base_activity_plot_info(measurement_path)
@@ -158,48 +209,64 @@ def process_measurement(data: MMLabsData, process_uuid: str, measurement_uuid: s
         return logs
 
     start_time = datetime.strptime(measurement_info['measurement_start'], "%Y-%m-%dT%H:%M:%S.%f%z")
-    duration_sec = measurement_info['duration_sec']
+    measurement_date = start_time.strftime("%Y-%m-%d")
 
-    df = pd.DataFrame({
-        'region': region_ts,
-        'activity': base_act_ts,
-        'handling_height': handling_heights_ts
-    })
+    # Setup directory structure
+    date_dir = os.path.join(process_base_dir, measurement_date)
+    set_id_dir = os.path.join(date_dir, measurement_info['set_id'])
+    beacons_dir = os.path.join(date_dir, "beacons")
+    os.makedirs(set_id_dir, exist_ok=True)
+    os.makedirs(beacons_dir, exist_ok=True)
 
+    # Process activity data
     start_time_seconds = start_time.hour * 3600 + start_time.minute * 60 + start_time.second + start_time.microsecond / 1e6
     start_time_seconds += 7200  # Add 7200 seconds (2 hours) for UTC+2
-    df['Start Time'] = [round(start_time_seconds + i * 0.1, 3) for i in range(len(df))]
-    df['End Time'] = df['Start Time'] + 0.1
-    df['End Time'] = df['End Time'].round(3)
-
-    logger.debug(f"DataFrame shape: {df.shape}")
-
-    df['region_name'] = df['region'].map(lambda x: region_uuid_to_name.get(x, 'Unknown Region'))
-    df['activity_name'] = df['activity'].map(activity_id_to_name_map)
-    df['handling_height_name'] = df['handling_height'].map(handling_height_id_to_name_map)
-
-    df['Activity'] = df.apply(lambda row: row['handling_height_name'] if row['activity_name'] == 'Handling' else row['activity_name'], axis=1)
-
-    final_df = df[['Start Time', 'End Time', 'region_name', 'Activity']].copy()
-    final_df.columns = ['Start Time', 'End Time', 'Region', 'Activity']
-    final_df['Set ID'] = measurement_info['set_id']
-    final_df = final_df[['Set ID', 'Start Time', 'End Time', 'Region', 'Activity']]
-
-    # Add 2 hours to the start_time for the filename
-    filename_time = start_time + timedelta(hours=2)
-    csv_path = os.path.join(output_dir, f"{measurement_info['set_id']}_{filename_time.strftime('%Y-%m-%dT%H_%M_%S')}.csv")
-    final_df.to_csv(csv_path, index=False)
     
-    actual_duration = final_df['End Time'].iloc[-1] - final_df['Start Time'].iloc[0]
-    duration_matches = abs(actual_duration - duration_sec) < 0.1  # Allow 0.1 second difference
-    
-    logs.append(f"Combined data saved to {csv_path}")
-    logs.append(f"Expected duration: {duration_sec}, Actual duration: {actual_duration}")
-    logs.append(f"Duration matches: {'Yes' if duration_matches else 'No'}")
-    
-    logger.debug(f"Combined data shape: {final_df.shape}")
-    logger.debug(f"CSV saved: {os.path.exists(csv_path)}")
-    logger.debug(f"Duration verification: {'Passed' if duration_matches else 'Failed'}")
+    df_activity = pd.DataFrame({
+        'id': measurement_info['set_id'],
+        'startTime': [round(start_time_seconds + i * 0.1, 3) for i in range(len(base_act_ts))],
+        'endTime': [round(start_time_seconds + (i + 1) * 0.1, 3) for i in range(len(base_act_ts))],
+        'region': [str(region_uuid_to_name.get(r, 'Unknown Region')) for r in region_ts],
+        'activity': [str(handling_height_id_to_name_map[h]) if activity_id_to_name_map[a] == 'Handling' 
+                    else str(activity_id_to_name_map[a]) for a, h in zip(base_act_ts, handling_heights_ts)],
+        'isPauseData': pause_ts.astype(int)
+    })
+
+    activity_filename = f"{measurement_info['set_id']}_{start_time.strftime('%Y-%m-%dT%H_%M_%S')}.csv"
+    activity_csv_path = os.path.join(set_id_dir, activity_filename)
+    df_activity.to_csv(activity_csv_path, index=False)
+    logger.debug(f"Saved activity data: {activity_csv_path}")
+    logs.append(f"Saved activity data: {activity_csv_path}")
+
+    # Process beacon data
+    try:
+        closeness_arr, usage_arr, beacon_uuids = get_dynamic_beacon_data_for_measurement(measurement_path, remove_pauses=False)
+        beacon_metadata = {d['uuid']: d for d in data.processes[process_uuid]["layout"]["dynamic_beacons"]}
+        
+        for idx, beacon_uuid in enumerate(beacon_uuids):
+            beacon_uuid_str = str(beacon_uuid)
+            beacon_metadata_entry = beacon_metadata.get(beacon_uuid_str, beacon_metadata.get(beacon_uuid, {}))
+            beacon_name = str(beacon_metadata_entry.get('comment', beacon_uuid_str))
+            beacon_dir = os.path.join(beacons_dir, beacon_name)
+            os.makedirs(beacon_dir, exist_ok=True)
+            
+            df_beacon = pd.DataFrame({
+                'id': measurement_info['set_id'],
+                'startTime': [round(start_time_seconds + i * 0.1, 3) for i in range(len(closeness_arr))],
+                'endTime': [round(start_time_seconds + (i + 1) * 0.1, 3) for i in range(len(closeness_arr))],
+                'region': [str(region_uuid_to_name.get(region_ts[i], 'Unknown Region')) for i in range(len(closeness_arr))],
+                'isNearby': closeness_arr[:, idx].astype(int),
+                'isUsing': usage_arr[:, idx].astype(int)
+            })
+            
+            beacon_csv_path = os.path.join(beacon_dir, activity_filename)
+            df_beacon.to_csv(beacon_csv_path, index=False)
+            logger.debug(f"Saved beacon data ({beacon_name}): {beacon_csv_path}")
+            logs.append(f"Saved beacon data ({beacon_name}): {beacon_csv_path}")
+
+    except Exception as e:
+        logger.error(f"Error processing beacon data: {str(e)}")
+        logs.append(f"Error processing beacon data: {str(e)}")
 
     return logs
 
