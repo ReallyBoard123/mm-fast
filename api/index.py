@@ -14,6 +14,7 @@ from api.exceptions import MMLabsException
 from api.measurement_processing import *
 import logging
 from datetime import datetime, timedelta
+import pytz
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -138,6 +139,7 @@ def process_data(data: MMLabsData, process_uuid: str, output_dir: str):
     
     # Save process metadata and layout once at process level
     metadata_path = os.path.join(process_base_dir, 'process_metadata.json')
+    measurements_path = os.path.join(process_base_dir, 'measurements.json')
     layout_path = os.path.join(process_base_dir, 'layout.png')
     os.makedirs(process_base_dir, exist_ok=True)
     
@@ -146,6 +148,12 @@ def process_data(data: MMLabsData, process_uuid: str, output_dir: str):
             json.dump(data.processes[process_uuid], f, indent=2)
             logger.debug(f"Saved process metadata: {metadata_path}")
             logs.append(f"Saved process metadata: {metadata_path}")
+            
+    if not os.path.exists(measurements_path):
+        with open(measurements_path, 'w') as f:
+            json.dump(data.measurements[process_uuid], f, indent=2)
+            logger.debug(f"Saved measurements data: {measurements_path}")
+            logs.append(f"Saved measurements data: {measurements_path}")
             
     if not os.path.exists(layout_path):
         layout_bytes = data.get_layout_image(process_uuid)
@@ -208,8 +216,11 @@ def process_measurement(data: MMLabsData, process_uuid: str, measurement_uuid: s
         logs.append(f"Measurement info not found for {measurement_uuid}")
         return logs
 
-    start_time = datetime.strptime(measurement_info['measurement_start'], "%Y-%m-%dT%H:%M:%S.%f%z")
-    measurement_date = start_time.strftime("%Y-%m-%d")
+    # Handle timezone conversion properly
+    utc_time = datetime.strptime(measurement_info['measurement_start'], "%Y-%m-%dT%H:%M:%S.%f%z")
+    germany_tz = pytz.timezone('Europe/Berlin')
+    local_time = utc_time.astimezone(germany_tz)
+    measurement_date = local_time.strftime("%Y-%m-%d")
 
     # Setup directory structure
     date_dir = os.path.join(process_base_dir, measurement_date)
@@ -218,9 +229,9 @@ def process_measurement(data: MMLabsData, process_uuid: str, measurement_uuid: s
     os.makedirs(set_id_dir, exist_ok=True)
     os.makedirs(beacons_dir, exist_ok=True)
 
-    # Process activity data
-    start_time_seconds = start_time.hour * 3600 + start_time.minute * 60 + start_time.second + start_time.microsecond / 1e6
-    start_time_seconds += 7200  # Add 7200 seconds (2 hours) for UTC+2
+    # Calculate time in seconds with proper timezone offset
+    local_midnight = local_time.replace(hour=0, minute=0, second=0, microsecond=0)
+    start_time_seconds = (local_time - local_midnight).total_seconds()
     
     df_activity = pd.DataFrame({
         'id': measurement_info['set_id'],
@@ -229,10 +240,10 @@ def process_measurement(data: MMLabsData, process_uuid: str, measurement_uuid: s
         'region': [str(region_uuid_to_name.get(r, 'Unknown Region')) for r in region_ts],
         'activity': [str(handling_height_id_to_name_map[h]) if activity_id_to_name_map[a] == 'Handling' 
                     else str(activity_id_to_name_map[a]) for a, h in zip(base_act_ts, handling_heights_ts)],
-        'isPauseData': pause_ts.astype(int)
+        'isPauseData': pause_ts
     })
 
-    activity_filename = f"{measurement_info['set_id']}_{start_time.strftime('%Y-%m-%dT%H_%M_%S')}.csv"
+    activity_filename = f"{measurement_info['set_id']}_{local_time.strftime('%Y-%m-%dT%H_%M_%S')}.csv"
     activity_csv_path = os.path.join(set_id_dir, activity_filename)
     df_activity.to_csv(activity_csv_path, index=False)
     logger.debug(f"Saved activity data: {activity_csv_path}")
@@ -255,14 +266,26 @@ def process_measurement(data: MMLabsData, process_uuid: str, measurement_uuid: s
                 'startTime': [round(start_time_seconds + i * 0.1, 3) for i in range(len(closeness_arr))],
                 'endTime': [round(start_time_seconds + (i + 1) * 0.1, 3) for i in range(len(closeness_arr))],
                 'region': [str(region_uuid_to_name.get(region_ts[i], 'Unknown Region')) for i in range(len(closeness_arr))],
-                'isNearby': closeness_arr[:, idx].astype(int),
-                'isUsing': usage_arr[:, idx].astype(int)
+                'isNearby': closeness_arr[:, idx].astype(bool),
+                'isUsing': usage_arr[:, idx].astype(bool)
             })
             
-            beacon_csv_path = os.path.join(beacon_dir, activity_filename)
-            df_beacon.to_csv(beacon_csv_path, index=False)
-            logger.debug(f"Saved beacon data ({beacon_name}): {beacon_csv_path}")
-            logs.append(f"Saved beacon data ({beacon_name}): {beacon_csv_path}")
+            # Filter rows where either isNearby or isUsing is True
+            df_beacon = df_beacon[
+                (df_beacon['isNearby']) | (df_beacon['isUsing'])
+            ].copy()
+            
+            # Only save if there are any relevant interactions
+            if not df_beacon.empty:
+                # Include beacon name in filename
+                beacon_filename = f"{beacon_name}_{activity_filename}"
+                beacon_csv_path = os.path.join(beacon_dir, beacon_filename)
+                df_beacon.to_csv(beacon_csv_path, index=False)
+                logger.debug(f"Saved beacon data ({beacon_name}): {beacon_csv_path}")
+                logs.append(f"Saved beacon data ({beacon_name}): {beacon_csv_path}")
+            else:
+                logger.debug(f"No relevant beacon interactions for {beacon_name}")
+                logs.append(f"No relevant beacon interactions for {beacon_name}")
 
     except Exception as e:
         logger.error(f"Error processing beacon data: {str(e)}")
